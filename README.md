@@ -82,13 +82,67 @@ falls back to those when a customer/voucher has no `router_id`).
 3. `DARAJA_CALLBACK_URL` must be a **publicly reachable HTTPS URL** —
    Safaricom can't call `localhost`. Use ngrok/a reverse tunnel in dev.
 
+## MikroTik hotspot integration (auto-login after payment)
+
+By default a customer who pays gets a voucher code and has to type it into
+the hotspot login form manually. To skip that — customer connects to WiFi,
+gets bounced straight to the payment page, pays, and is online with no
+typing — wire the router up like this:
+
+**1. Walled garden — let unauthenticated clients reach your payment domain**
+
+RouterOS blocks all traffic from unauthenticated hotspot clients, including
+to your payment page and its API, unless you explicitly allow it:
+
+```
+/ip hotspot walled-garden add dst-host=YOUR-DOMAIN-HERE.example.com action=allow
+/ip hotspot walled-garden add dst-host=fonts.googleapis.com action=allow
+/ip hotspot walled-garden add dst-host=fonts.gstatic.com action=allow
+```
+
+(Skip the fonts entries if you've swapped the page to system fonts.)
+
+**2. Upload the redirect page as the hotspot's login page**
+
+`public/mikrotik-login-redirect.html` replaces the router's default login
+form — it does no UI of its own, it just hands the client off to your real
+payment page with the session details RouterOS needs to log them back in.
+
+- Open the file and set `PAYMENT_PAGE_URL` to your deployed page's URL
+  (e.g. `https://netlink-billing.onrender.com`)
+- Upload it to the router (Winbox → Files → drag it in, or `/tool fetch`
+  it from somewhere you're hosting it temporarily) as
+  `hotspot/login.html`, overwriting the existing one — back up the
+  original first: `/file print` then copy it, in case you want to revert
+- Make sure the hotspot server profile is pointed at that directory:
+  `/ip hotspot profile print` → confirm `html-directory=hotspot`
+
+**3. How the handoff works, end to end**
+
+```
+Client joins WiFi → RouterOS shows login.html (our redirect page)
+  → browser jumps to https://your-payment-page/?link-login-only=...&mac=...
+  → customer picks a plan, pays via STK push
+  → on success, the page POSTs the voucher code to link-login-only
+    (the router's own login endpoint) in a hidden iframe
+  → RouterOS logs the client in, page redirects them to link-orig
+    (the page they originally tried to open)
+```
+
+If the payment page is opened directly (shared link, QR code, not via the
+router), it just falls back to showing the code for manual entry — the
+auto-login only kicks in when the router's `link-login-only` variable is
+present in the URL.
+
 ## Key API endpoints
+
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/api/auth/login` | — | Admin login, returns JWT |
 | GET | `/api/plans` | — | List active plans (customer-facing) |
 | POST | `/api/mpesa/stkpush` | — | Trigger payment prompt for a plan |
+| GET | `/api/mpesa/status/:checkoutRequestId` | — | Poll payment status (used by the payment page) |
 | POST | `/api/mpesa/callback` | — | Daraja webhook (not for humans) |
 | POST | `/api/vouchers/:code/redeem` | — | Redeem a pre-printed voucher |
 | GET | `/api/customers` | JWT | List customers |
