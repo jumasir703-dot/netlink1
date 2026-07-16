@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!--
+  mikrotik-login-redirect.html
+
+  This file replaces the default login page in your MikroTik hotspot's
+  html-directory (normally /flash/hotspot/login.html). It does not show
+  any UI itself — it immediately hands the client off to your externally
+  hosted payment page, carrying the RouterOS session variables that page
+  needs to log the client back into the hotspot once they've paid.
+
+  RouterOS substitutes the $(...) placeholders below server-side when it
+  serves this file, so by the time it reaches the browser they're already
+  real values (the actual login URL, the client's MAC, etc).
+
+  INSTALL:
+    1. Edit PAYMENT_PAGE_URL below to your deployed payment page's URL.
+    2. Upload this file to the router's hotspot files directory as
+       "login.html" (see README section "MikroTik hotspot integration"
+       for the exact steps — Winbox Files, or /tool fetch + rename).
+    3. Add walled-garden entries so unauthenticated clients can reach
+       your payment domain (also in the README) — without this, RouterOS
+       blocks the redirect before it ever leaves the router.
+-->
+<html>
+<head>
+  <meta charset="UTF-8">
+  <script>
+    var PAYMENT_PAGE_URL = "https://YOUR-DOMAIN-HERE.example.com";
+
+    var params = new URLSearchParams({
+      "link-login-only": "$(link-login-only)",
+      "link-orig": "$(link-orig)",
+      "mac": "$(mac)",
+      "ip": "$(ip)"
+    });
+
+    window.location.replace(PAYMENT_PAGE_URL + "/?" + params.toString());
+  </script>
+</head>
+<body>
+  <!-- Fallback for the rare client with JS disabled -->
+  <noscript>
+    <p>Please enable JavaScript, or open this link to pay for WiFi access:</p>
+    <a href="REPLACE_WITH_PAYMENT_PAGE_URL">Pay for WiFi</a>
+  </noscript>
+</body>
+</html>
