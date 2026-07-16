@@ -412,6 +412,58 @@
   const POLL_INTERVAL_MS = 3000;
   const POLL_TIMEOUT_MS = 120000; // stop polling after 2 min, ask them to check again
 
+  // ── MikroTik hotspot context ────────────────────────────
+  // When this page is reached via the router's login redirect (see
+  // mikrotik-login-redirect.html), RouterOS passes along the values it
+  // needs to actually log the client in once they've paid. If these are
+  // absent, we're just being opened as a plain payment link (e.g. shared
+  // manually) — falls back to "here's your code, type it in".
+  const urlParams = new URLSearchParams(window.location.search);
+  const hotspotCtx = {
+    linkLoginOnly: urlParams.get('link-login-only'),
+    linkOrig: urlParams.get('link-orig'),
+    mac: urlParams.get('mac'),
+    ip: urlParams.get('ip'),
+  };
+  const isHotspotFlow = !!hotspotCtx.linkLoginOnly;
+
+  /**
+   * Log the client into the MikroTik hotspot directly, by POSTing their
+   * voucher code as username+password to the router's own login handler
+   * (the same endpoint the router's native login form submits to). Runs
+   * in a hidden iframe so it doesn't navigate this page away before we've
+   * shown the success state.
+   */
+  function autoLoginToHotspot(code) {
+    if (!isHotspotFlow) return;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = hotspotCtx.linkLoginOnly;
+    form.target = iframe.name = 'hotspot-auto-login';
+
+    [['username', code], ['password', code]].forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+
+    // Give the router a moment to process the login, then send the
+    // customer on to whatever page they originally tried to open.
+    setTimeout(() => {
+      window.location.href = hotspotCtx.linkOrig || 'http://www.google.com';
+    }, 2500);
+  }
+
   // ── State ─────────────────────────────────────────────
   let selectedPlan = null;
   let pollTimer = null;
@@ -587,7 +639,14 @@
         if (data.voucherCode) {
           voucherBox.style.display = 'block';
           voucherCode.textContent = data.voucherCode;
-          voucherHint.textContent = 'Enter this as both username and password on the WiFi login page.';
+
+          if (isHotspotFlow) {
+            voucherHint.textContent = 'Logging you in automatically — hang tight.';
+            autoLoginToHotspot(data.voucherCode);
+            statusDetail.textContent = 'Payment confirmed. Connecting you now…';
+          } else {
+            voucherHint.textContent = 'Enter this as both username and password on the WiFi login page.';
+          }
         } else if (data.pppoeUsername) {
           voucherBox.style.display = 'block';
           voucherCode.textContent = data.pppoeUsername;
